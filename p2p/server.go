@@ -39,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/ethereum/go-ethereum/p2p/nat"
 	"github.com/ethereum/go-ethereum/p2p/netutil"
+	"github.com/streadway/amqp"
 )
 
 const (
@@ -197,6 +198,9 @@ type Server struct {
 
 	// State of run loop and listenLoop.
 	inboundHistory expHeap
+
+	// MQ connection to signal peer connection/disconnection
+	mq_conn amqp.Connection
 }
 
 type peerOpFunc func(map[enode.ID]*Peer)
@@ -483,8 +487,21 @@ func (srv *Server) Start() (err error) {
 	}
 	srv.setupDialScheduler()
 
+	if err := srv.setupMQConnection(); err != nil {
+		return err
+	}
+
 	srv.loopWG.Add(1)
 	go srv.run()
+	return nil
+}
+
+func (srv *Server) setupMQConnection() error {
+	conn, err := getMQConnection()
+	if err != nil {
+		return err
+	}
+	srv.mq_conn = *conn
 	return nil
 }
 
@@ -697,6 +714,7 @@ func (srv *Server) run() {
 	defer srv.nodedb.Close()
 	defer srv.discmix.Close()
 	defer srv.dialsched.stop()
+	defer srv.mq_conn.Close()
 
 	var (
 		peers        = make(map[enode.ID]*Peer)
@@ -761,6 +779,13 @@ running:
 				srv.dialsched.peerAdded(c)
 				if p.Inbound() {
 					inboundCount++
+				}
+
+				//send new-peer msg
+				peerinfo := p.String()
+				err = sendMQMsg(&srv.mq_conn, "add_peer", peerinfo)
+				if err != nil {
+					srv.log.Error("Unable to send MQ message: ADD_PEER")
 				}
 			}
 			c.cont <- err
