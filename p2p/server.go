@@ -200,7 +200,9 @@ type Server struct {
 	inboundHistory expHeap
 
 	// MQ connection to signal peer connection/disconnection
-	mq_conn amqp.Connection
+	mq_conn           *amqp.Connection
+	mq_channel        *amqp.Channel
+	write_msg_channel chan string
 }
 
 type peerOpFunc func(map[enode.ID]*Peer)
@@ -487,21 +489,14 @@ func (srv *Server) Start() (err error) {
 	}
 	srv.setupDialScheduler()
 
-	if err := srv.setupMQConnection(); err != nil {
-		return err
-	}
+	srv.mq_conn = SetupMQConnection()
+	srv.mq_channel = SetupMQChannel(srv.mq_conn)
+	srv.write_msg_channel = make(chan string)
+
+	go write_string_to_mq("add_peer", srv.mq_channel, srv.write_msg_channel)
 
 	srv.loopWG.Add(1)
 	go srv.run()
-	return nil
-}
-
-func (srv *Server) setupMQConnection() error {
-	conn, err := getMQConnection()
-	if err != nil {
-		return err
-	}
-	srv.mq_conn = *conn
 	return nil
 }
 
@@ -774,6 +769,7 @@ running:
 			if err == nil {
 				// The handshakes are done and it passed all checks.
 				p := srv.launchPeer(c)
+				p.log.Info("Launched peer... %s", p.String)
 				peers[c.node.ID()] = p
 				srv.log.Debug("Adding p2p peer", "peercount", len(peers), "id", p.ID(), "conn", c.flags, "addr", p.RemoteAddr(), "name", p.Name())
 				srv.dialsched.peerAdded(c)
@@ -783,7 +779,8 @@ running:
 
 				//send new-peer msg
 				peerinfo := p.String()
-				err = sendMQMsg(&srv.mq_conn, "add_peer", peerinfo)
+				srv.write_msg_channel <- peerinfo
+
 				if err != nil {
 					srv.log.Error("Unable to send MQ message: ADD_PEER")
 				}
@@ -1038,7 +1035,7 @@ func (srv *Server) checkpoint(c *conn, stage chan<- *conn) error {
 }
 
 func (srv *Server) launchPeer(c *conn) *Peer {
-	p := newPeer(srv.log, c, srv.Protocols)
+	p := newPeer(srv.log, c, srv.Protocols, srv.mq_conn)
 	if srv.EnableMsgEvents {
 		// If message events are enabled, pass the peerFeed
 		// to the peer.

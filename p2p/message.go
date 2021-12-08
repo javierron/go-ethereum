@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"sync/atomic"
 	"time"
 
@@ -76,6 +77,7 @@ func (msg Msg) Time() time.Time {
 
 type MsgReader interface {
 	ReadMsg() (Msg, error)
+	// ReadPlainMsg() (PlainMsg, error)
 }
 
 type MsgWriter interface {
@@ -98,11 +100,17 @@ type MsgReadWriter interface {
 // Send writes an RLP-encoded message with the given code.
 // data should encode as an RLP list.
 func Send(w MsgWriter, msgcode uint64, data interface{}) error {
+	log.Printf("SEND: %d", msgcode)
 	size, r, err := rlp.EncodeToReader(data)
 	if err != nil {
 		return err
 	}
 	return w.WriteMsg(Msg{Code: msgcode, Size: uint32(size), Payload: r})
+}
+
+func SendMsg(w MsgWriter, msg Msg) error {
+	log.Printf("SENDMSG: %s", msg.String())
+	return w.WriteMsg(msg)
 }
 
 // SendItems writes an RLP with the given code and data elements.

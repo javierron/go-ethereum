@@ -28,10 +28,10 @@ import (
 	"github.com/ethereum/go-ethereum/common/mclock"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/streadway/amqp"
 )
 
 var (
@@ -117,6 +117,11 @@ type Peer struct {
 	// events receives message send / receive events if set
 	events   *event.Feed
 	testPipe *MsgPipeRW // for testing
+
+	mq_conn           *amqp.Connection
+	mq_channel        *amqp.Channel
+	read_msg_channel  chan Msg
+	write_msg_channel chan Msg
 }
 
 // NewPeer returns a peer for testing purposes.
@@ -124,7 +129,7 @@ func NewPeer(id enode.ID, name string, caps []Cap) *Peer {
 	pipe, _ := net.Pipe()
 	node := enode.SignNull(new(enr.Record), id)
 	conn := &conn{fd: pipe, transport: nil, node: node, caps: caps, name: name}
-	peer := newPeer(log.Root(), conn, nil)
+	peer := newPeer(log.Root(), conn, nil, &amqp.Connection{})
 	close(peer.closed) // ensures Disconnect doesn't block
 	return peer
 }
@@ -216,16 +221,20 @@ func (p *Peer) Inbound() bool {
 	return p.rw.is(inboundConn)
 }
 
-func newPeer(log log.Logger, conn *conn, protocols []Protocol) *Peer {
+func newPeer(log log.Logger, conn *conn, protocols []Protocol, mq_conn *amqp.Connection) *Peer {
 	protomap := matchProtocols(protocols, conn.caps, conn)
 	p := &Peer{
-		rw:       conn,
-		running:  protomap,
-		created:  mclock.Now(),
-		disc:     make(chan DiscReason),
-		protoErr: make(chan error, len(protomap)+1), // protocols + pingLoop
-		closed:   make(chan struct{}),
-		log:      log.New("id", conn.node.ID(), "conn", conn.flags),
+		rw:                conn,
+		running:           protomap,
+		created:           mclock.Now(),
+		disc:              make(chan DiscReason),
+		protoErr:          make(chan error, len(protomap)+1), // protocols + pingLoop
+		closed:            make(chan struct{}),
+		log:               log.New("id", conn.node.ID(), "conn", conn.flags),
+		mq_conn:           mq_conn,
+		mq_channel:        SetupMQChannel(mq_conn),
+		read_msg_channel:  make(chan Msg),
+		write_msg_channel: make(chan Msg),
 	}
 	return p
 }
@@ -245,6 +254,12 @@ func (p *Peer) run() (remoteRequested bool, err error) {
 	go p.readLoop(readErr)
 	go p.pingLoop()
 
+	p.log.Info("Read/Write to... %s", p.String)
+	go read_msg_from_mq(p.String(), p.mq_channel, p.read_msg_channel)
+	go write_msg_to_mq(p.String(), p.mq_channel, p.write_msg_channel)
+
+	go p.readSubnodeMsgs()
+
 	// Start all protocol handlers.
 	writeStart <- struct{}{}
 	p.startProtocols(writeStart, writeErr)
@@ -258,6 +273,7 @@ loop:
 			// there was no error.
 			if err != nil {
 				reason = DiscNetworkError
+				log.Info("ERROR 1")
 				break loop
 			}
 			writeStart <- struct{}{}
@@ -268,12 +284,16 @@ loop:
 			} else {
 				reason = DiscNetworkError
 			}
+			log.Info("ERROR 2")
 			break loop
 		case err = <-p.protoErr:
 			reason = discReasonForError(err)
-			break loop
+			log.Info("ERROR 3")
+			log.Info(err.Error())
+			// break loop
 		case err = <-p.disc:
 			reason = discReasonForError(err)
+			log.Info("ERROR 4")
 			break loop
 		}
 	}
@@ -302,6 +322,15 @@ func (p *Peer) pingLoop() {
 	}
 }
 
+func (p *Peer) readSubnodeMsgs() {
+
+	for msg := range p.read_msg_channel {
+		//TODO HERE IS WHERE MSG COMPARE/VOTING SHOULD HAPPEN
+		p.log.Info("MESSAGE SENT " + msg.String())
+		SendMsg(p.rw, msg)
+	}
+}
+
 func (p *Peer) readLoop(errc chan<- error) {
 	defer p.wg.Done()
 	for {
@@ -319,37 +348,46 @@ func (p *Peer) readLoop(errc chan<- error) {
 }
 
 func (p *Peer) handle(msg Msg) error {
-	switch {
-	case msg.Code == pingMsg:
-		msg.Discard()
-		go SendItems(p.rw, pongMsg)
-	case msg.Code == discMsg:
-		var reason [1]DiscReason
-		// This is the last message. We don't need to discard or
-		// check errors because, the connection will be closed after it.
-		rlp.Decode(msg.Payload, &reason)
-		return reason[0]
-	case msg.Code < baseProtocolLength:
-		// ignore other base protocol messages
-		return msg.Discard()
-	default:
-		// it's a subprotocol message
-		proto, err := p.getProto(msg.Code)
-		if err != nil {
-			return fmt.Errorf("msg code out of range: %v", msg.Code)
-		}
-		if metrics.Enabled {
-			m := fmt.Sprintf("%s/%s/%d/%#02x", ingressMeterName, proto.Name, proto.Version, msg.Code-proto.offset)
-			metrics.GetOrRegisterMeter(m, nil).Mark(int64(msg.meterSize))
-			metrics.GetOrRegisterMeter(m+"/packets", nil).Mark(1)
-		}
-		select {
-		case proto.in <- msg:
-			return nil
-		case <-p.closed:
-			return io.EOF
-		}
+	p.log.Info("HANDLE! %s", msg.String())
+	//p2p server -> handling means relaying msg to subnode peers
+
+	if msg.Code == 16 {
+		time.Sleep(2 * time.Second)
 	}
+
+	p.write_msg_channel <- msg
+
+	// switch {
+	// case msg.Code == pingMsg:
+	// 	msg.Discard()
+	// 	go SendItems(p.rw, pongMsg)
+	// case msg.Code == discMsg:
+	// 	var reason [1]DiscReason
+	// 	// This is the last message. We don't need to discard or
+	// 	// check errors because, the connection will be closed after it.
+	// 	rlp.Decode(msg.Msg.Payload, &reason)
+	// 	return reason[0]
+	// case msg.Code < baseProtocolLength:
+	// 	// ignore other base protocol messages
+	// 	return msg.Discard()
+	// default:
+	// 	// it's a subprotocol message
+	// 	proto, err := p.getProto(msg.Code)
+	// 	if err != nil {
+	// 		return fmt.Errorf("msg code out of range: %v", msg.Code)
+	// 	}
+	// 	if metrics.Enabled {
+	// 		m := fmt.Sprintf("%s/%s/%d/%#02x", ingressMeterName, proto.Name, proto.Version, msg.Code-proto.offset)
+	// 		metrics.GetOrRegisterMeter(m, nil).Mark(int64(msg.meterSize))
+	// 		metrics.GetOrRegisterMeter(m+"/packets", nil).Mark(1)
+	// 	}
+	// 	select {
+	// 	case proto.in <- msg:
+	// 		return nil
+	// 	case <-p.closed:
+	// 		return io.EOF
+	// 	}
+	// }
 	return nil
 }
 
@@ -448,6 +486,7 @@ func (rw *protoRW) WriteMsg(msg Msg) (err error) {
 
 	select {
 	case <-rw.wstart:
+		fmt.Printf("peer Write msg %s\n", msg.String())
 		err = rw.w.WriteMsg(msg)
 		// Report write status back to Peer.run. It will initiate
 		// shutdown if the error is non-nil and unblock the next write
@@ -469,6 +508,16 @@ func (rw *protoRW) ReadMsg() (Msg, error) {
 		return Msg{}, io.EOF
 	}
 }
+
+// func (rw *protoRW) ReadPlainMsg() (PlainMsg, error) {
+// 	select {
+// 	case msg := <-rw.in:
+// 		msg.Code -= rw.offset
+// 		return msg, nil
+// 	case <-rw.closed:
+// 		return PlainMsg{}, io.EOF
+// 	}
+// }
 
 // PeerInfo represents a short summary of the information known about a connected
 // peer. Sub-protocol independent fields are contained and initialized here, with

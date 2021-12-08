@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"log"
 	mrand "math/rand"
 	"net"
 	"time"
@@ -37,6 +38,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/ecies"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/go-stack/stack"
 	"github.com/golang/snappy"
 	"golang.org/x/crypto/sha3"
 )
@@ -209,6 +211,8 @@ func (h *sessionState) readFrame(conn io.Reader) ([]byte, error) {
 // Write returns the written size of the message data. This may be less than or equal to
 // len(data) depending on whether snappy compression is enabled.
 func (c *Conn) Write(code uint64, data []byte) (uint32, error) {
+	log.Println(stack.Trace().String())
+	log.Printf("Writing something to rlpx\n")
 	if c.session == nil {
 		panic("can't WriteMsg before handshake")
 	}
@@ -225,6 +229,8 @@ func (c *Conn) Write(code uint64, data []byte) (uint32, error) {
 
 	wireSize := uint32(len(data))
 	err := c.session.writeFrame(c.conn, code, data)
+	log.Printf("Writing something to rlpx %d\n", code)
+
 	return wireSize, err
 }
 

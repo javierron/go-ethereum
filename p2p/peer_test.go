@@ -31,6 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
+	"github.com/streadway/amqp"
 )
 
 var discard = Protocol{
@@ -100,7 +101,7 @@ func testPeer(protos []Protocol) (func(), *conn, *Peer, <-chan error) {
 		c2.caps = append(c2.caps, p.cap())
 	}
 
-	peer := newPeer(log.Root(), c1, protos)
+	peer := newPeer(log.Root(), c1, protos, &amqp.Connection{})
 	errc := make(chan error, 1)
 	go func() {
 		_, err := peer.run()

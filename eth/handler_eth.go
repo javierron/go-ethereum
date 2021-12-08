@@ -42,7 +42,8 @@ func (h *ethHandler) TxPool() eth.TxPool          { return h.txpool }
 
 // RunPeer is invoked when a peer joins on the `eth` protocol.
 func (h *ethHandler) RunPeer(peer *eth.Peer, hand eth.Handler) error {
-	return (*handler)(h).runEthPeer(peer, hand)
+	return nil
+	// return (*handler)(h).runEthPeer(peer, hand)
 }
 
 // PeerInfo retrieves all known `eth` information about a peer.

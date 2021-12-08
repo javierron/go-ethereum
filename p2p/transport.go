@@ -21,6 +21,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/p2p/rlpx"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/go-stack/stack"
 )
 
 const (
@@ -79,6 +81,7 @@ func (t *rlpxTransport) ReadMsg() (Msg, error) {
 }
 
 func (t *rlpxTransport) WriteMsg(msg Msg) error {
+	log.Println(stack.Trace().String())
 	t.wmu.Lock()
 	defer t.wmu.Unlock()
 
@@ -90,6 +93,8 @@ func (t *rlpxTransport) WriteMsg(msg Msg) error {
 
 	// Write the message.
 	t.conn.SetWriteDeadline(time.Now().Add(frameWriteTimeout))
+	log.Printf("transport Writing msg ======================= %d\n", msg.Code)
+	log.Printf(stack.Trace().String())
 	size, err := t.conn.Write(msg.Code, t.wbuf.Bytes())
 	if err != nil {
 		return err
@@ -102,6 +107,8 @@ func (t *rlpxTransport) WriteMsg(msg Msg) error {
 		metrics.GetOrRegisterMeter(m, nil).Mark(int64(msg.meterSize))
 		metrics.GetOrRegisterMeter(m+"/packets", nil).Mark(1)
 	}
+	log.Printf("transport done Writing msg ======================= %d\n", msg.Code)
+
 	return nil
 }
 

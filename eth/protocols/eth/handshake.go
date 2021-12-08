@@ -23,7 +23,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/forkid"
-	"github.com/ethereum/go-ethereum/p2p"
 )
 
 const (
@@ -36,42 +35,42 @@ const (
 // network IDs, difficulties, head and genesis blocks.
 func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis common.Hash, forkID forkid.ID, forkFilter forkid.Filter) error {
 	// Send out own handshake in a new thread
-	errc := make(chan error, 2)
+	// errc := make(chan error, 2)
 
-	var status StatusPacket // safe to read after two values have been received from errc
+	// var status StatusPacket // safe to read after two values have been received from errc
 
-	go func() {
-		errc <- p2p.Send(p.rw, StatusMsg, &StatusPacket{
-			ProtocolVersion: uint32(p.version),
-			NetworkID:       network,
-			TD:              td,
-			Head:            head,
-			Genesis:         genesis,
-			ForkID:          forkID,
-		})
-	}()
-	go func() {
-		errc <- p.readStatus(network, &status, genesis, forkFilter)
-	}()
-	timeout := time.NewTimer(handshakeTimeout)
-	defer timeout.Stop()
-	for i := 0; i < 2; i++ {
-		select {
-		case err := <-errc:
-			if err != nil {
-				return err
-			}
-		case <-timeout.C:
-			return p2p.DiscReadTimeout
-		}
-	}
-	p.td, p.head = status.TD, status.Head
+	// go func() {
+	// 	errc <- p2p.Send(p.rw, StatusMsg, &StatusPacket{
+	// 		ProtocolVersion: uint32(p.version),
+	// 		NetworkID:       network,
+	// 		TD:              td,
+	// 		Head:            head,
+	// 		Genesis:         genesis,
+	// 		ForkID:          forkID,
+	// 	})
+	// }()
+	// go func() {
+	// 	errc <- p.readStatus(network, &status, genesis, forkFilter)
+	// }()
+	// timeout := time.NewTimer(handshakeTimeout)
+	// defer timeout.Stop()
+	// for i := 0; i < 2; i++ {
+	// 	select {
+	// 	case err := <-errc:
+	// 		if err != nil {
+	// 			return err
+	// 		}
+	// 	case <-timeout.C:
+	// 		return p2p.DiscReadTimeout
+	// 	}
+	// }
+	// p.td, p.head = status.TD, status.Head
 
-	// TD at mainnet block #7753254 is 76 bits. If it becomes 100 million times
-	// larger, it will still fit within 100 bits
-	if tdlen := p.td.BitLen(); tdlen > 100 {
-		return fmt.Errorf("too large total difficulty: bitlen %d", tdlen)
-	}
+	// // TD at mainnet block #7753254 is 76 bits. If it becomes 100 million times
+	// // larger, it will still fit within 100 bits
+	// if tdlen := p.td.BitLen(); tdlen > 100 {
+	// 	return fmt.Errorf("too large total difficulty: bitlen %d", tdlen)
+	// }
 	return nil
 }
 
