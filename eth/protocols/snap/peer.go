@@ -36,9 +36,9 @@ type Peer struct {
 // newPeer create a wrapper for a network connection and negotiated  protocol
 // version.
 func newPeer(version uint, p *p2p.Peer, rw p2p.MsgReadWriter) *Peer {
-	id := p.ID().String()
+	id := p.ID()
 	return &Peer{
-		id:      id,
+		id:      id.String(),
 		Peer:    p,
 		rw:      rw,
 		version: version,

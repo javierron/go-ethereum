@@ -30,7 +30,6 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -120,27 +119,31 @@ type Peer struct {
 }
 
 // NewPeer returns a peer for testing purposes.
-func NewPeer(id enode.ID, name string, caps []Cap) *Peer {
-	pipe, _ := net.Pipe()
-	node := enode.SignNull(new(enr.Record), id)
-	conn := &conn{fd: pipe, transport: nil, node: node, caps: caps, name: name}
-	peer := newPeer(log.Root(), conn, nil)
-	close(peer.closed) // ensures Disconnect doesn't block
-	return peer
-}
+// func NewPeer(id enode.ID, name string, caps []Cap) *Peer {
+// 	pipe, _ := net.Pipe()
+// 	node := enode.SignNull(new(enr.Record), id)
+// 	conn := &conn{fd: pipe, transport: nil, node: node, caps: caps, name: name}
+// 	peer := newPeer(log.Root(), conn, nil)
+// 	close(peer.closed) // ensures Disconnect doesn't block
+// 	return peer
+// }
 
 // NewPeerPipe creates a peer for testing purposes.
 // The message pipe given as the last parameter is closed when
 // Disconnect is called on the peer.
-func NewPeerPipe(id enode.ID, name string, caps []Cap, pipe *MsgPipeRW) *Peer {
-	p := NewPeer(id, name, caps)
-	p.testPipe = pipe
-	return p
-}
+// func NewPeerPipe(id enode.ID, name string, caps []Cap, pipe *MsgPipeRW) *Peer {
+// 	p := NewPeer(id, name, caps)
+// 	p.testPipe = pipe
+// 	return p
+// }
 
 // ID returns the node's public key.
+// func (p *Peer) ID() enode.ID {
 func (p *Peer) ID() enode.ID {
-	return p.rw.node.ID()
+	fd := []byte(p.rw.fd)
+	var r [32]byte
+	copy(r[:], fd[:32])
+	return enode.ID(r)
 }
 
 // Node returns the peer's node descriptor.
@@ -184,12 +187,14 @@ func (p *Peer) RunningCap(protocol string, versions []uint) bool {
 
 // RemoteAddr returns the remote address of the network connection.
 func (p *Peer) RemoteAddr() net.Addr {
-	return p.rw.fd.RemoteAddr()
+	return &net.IPAddr{}
+	// return p.rw.fd.RemoteAddr()
 }
 
 // LocalAddr returns the local address of the network connection.
 func (p *Peer) LocalAddr() net.Addr {
-	return p.rw.fd.LocalAddr()
+	return &net.IPAddr{}
+	// return p.rw.fd.LocalAddr()
 }
 
 // Disconnect terminates the peer connection with the given reason.
@@ -225,7 +230,7 @@ func newPeer(log log.Logger, conn *conn, protocols []Protocol) *Peer {
 		disc:     make(chan DiscReason),
 		protoErr: make(chan error, len(protomap)+1), // protocols + pingLoop
 		closed:   make(chan struct{}),
-		log:      log.New("id", conn.node.ID(), "conn", conn.flags),
+		log:      log.New("id", conn.fd),
 	}
 	return p
 }
@@ -258,6 +263,8 @@ loop:
 			// there was no error.
 			if err != nil {
 				reason = DiscNetworkError
+				log.Info("1", err)
+
 				break loop
 			}
 			writeStart <- struct{}{}
@@ -268,16 +275,21 @@ loop:
 			} else {
 				reason = DiscNetworkError
 			}
+			log.Info("2", err)
+
 			break loop
 		case err = <-p.protoErr:
 			reason = discReasonForError(err)
+			log.Info("3", err)
+
 			break loop
 		case err = <-p.disc:
 			reason = discReasonForError(err)
+			log.Info("4", err)
+
 			break loop
 		}
 	}
-
 	close(p.closed)
 	p.rw.close(reason)
 	p.wg.Wait()
@@ -292,6 +304,8 @@ func (p *Peer) pingLoop() {
 		select {
 		case <-ping.C:
 			if err := SendItems(p.rw, pingMsg); err != nil {
+				p.log.Info("ERROR")
+				p.log.Info(err.Error())
 				p.protoErr <- err
 				return
 			}
@@ -307,11 +321,14 @@ func (p *Peer) readLoop(errc chan<- error) {
 	for {
 		msg, err := p.rw.ReadMsg()
 		if err != nil {
+			p.log.Info("ERROR 1")
 			errc <- err
 			return
 		}
 		msg.ReceivedAt = time.Now()
 		if err = p.handle(msg); err != nil {
+			p.log.Info("ERROR 2")
+			p.log.Info(err.Error())
 			errc <- err
 			return
 		}
@@ -328,6 +345,7 @@ func (p *Peer) handle(msg Msg) error {
 		// This is the last message. We don't need to discard or
 		// check errors because, the connection will be closed after it.
 		rlp.Decode(msg.Payload, &reason)
+		p.log.Info("REASON: " + reason[0].String())
 		return reason[0]
 	case msg.Code < baseProtocolLength:
 		// ignore other base protocol messages
@@ -498,7 +516,7 @@ func (p *Peer) Info() *PeerInfo {
 	}
 	// Assemble the generic peer metadata
 	info := &PeerInfo{
-		Enode:     p.Node().URLv4(),
+		Enode:     p.rw.fd, // p.Node().URLv4(),
 		ID:        p.ID().String(),
 		Name:      p.Fullname(),
 		Caps:      caps,

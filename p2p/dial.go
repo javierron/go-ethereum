@@ -127,7 +127,7 @@ type dialScheduler struct {
 	doneSinceLastLog int
 }
 
-type dialSetupFunc func(net.Conn, connFlag, *enode.Node) error
+type dialSetupFunc func(string, connFlag, *enode.Node) error
 
 type dialConfig struct {
 	self           enode.ID         // our own ID
@@ -160,27 +160,27 @@ func (cfg dialConfig) withDefaults() dialConfig {
 	return cfg
 }
 
-func newDialScheduler(config dialConfig, it enode.Iterator, setupFunc dialSetupFunc) *dialScheduler {
-	d := &dialScheduler{
-		dialConfig:  config.withDefaults(),
-		setupFunc:   setupFunc,
-		dialing:     make(map[enode.ID]*dialTask),
-		static:      make(map[enode.ID]*dialTask),
-		peers:       make(map[enode.ID]struct{}),
-		doneCh:      make(chan *dialTask),
-		nodesIn:     make(chan *enode.Node),
-		addStaticCh: make(chan *enode.Node),
-		remStaticCh: make(chan *enode.Node),
-		addPeerCh:   make(chan *conn),
-		remPeerCh:   make(chan *conn),
-	}
-	d.lastStatsLog = d.clock.Now()
-	d.ctx, d.cancel = context.WithCancel(context.Background())
-	d.wg.Add(2)
-	go d.readNodes(it)
-	go d.loop(it)
-	return d
-}
+// func newDialScheduler(config dialConfig, it enode.Iterator, setupFunc dialSetupFunc) *dialScheduler {
+// 	d := &dialScheduler{
+// 		dialConfig:  config.withDefaults(),
+// 		setupFunc:   setupFunc,
+// 		dialing:     make(map[enode.ID]*dialTask),
+// 		static:      make(map[enode.ID]*dialTask),
+// 		peers:       make(map[enode.ID]struct{}),
+// 		doneCh:      make(chan *dialTask),
+// 		nodesIn:     make(chan *enode.Node),
+// 		addStaticCh: make(chan *enode.Node),
+// 		remStaticCh: make(chan *enode.Node),
+// 		addPeerCh:   make(chan *conn),
+// 		remPeerCh:   make(chan *conn),
+// 	}
+// 	d.lastStatsLog = d.clock.Now()
+// 	d.ctx, d.cancel = context.WithCancel(context.Background())
+// 	d.wg.Add(2)
+// 	go d.readNodes(it)
+// 	go d.loop(it)
+// 	return d
+// }
 
 // stop shuts down the dialer, canceling all current dial tasks.
 func (d *dialScheduler) stop() {
@@ -221,98 +221,98 @@ func (d *dialScheduler) peerRemoved(c *conn) {
 }
 
 // loop is the main loop of the dialer.
-func (d *dialScheduler) loop(it enode.Iterator) {
-	var (
-		nodesCh    chan *enode.Node
-		historyExp = make(chan struct{}, 1)
-	)
+// func (d *dialScheduler) loop(it enode.Iterator) {
+// 	var (
+// 		nodesCh    chan *enode.Node
+// 		historyExp = make(chan struct{}, 1)
+// 	)
 
-loop:
-	for {
-		// Launch new dials if slots are available.
-		slots := d.freeDialSlots()
-		slots -= d.startStaticDials(slots)
-		if slots > 0 {
-			nodesCh = d.nodesIn
-		} else {
-			nodesCh = nil
-		}
-		d.rearmHistoryTimer(historyExp)
-		d.logStats()
+// loop:
+// 	for {
+// 		// Launch new dials if slots are available.
+// 		slots := d.freeDialSlots()
+// 		slots -= d.startStaticDials(slots)
+// 		if slots > 0 {
+// 			nodesCh = d.nodesIn
+// 		} else {
+// 			nodesCh = nil
+// 		}
+// 		d.rearmHistoryTimer(historyExp)
+// 		d.logStats()
 
-		select {
-		case node := <-nodesCh:
-			if err := d.checkDial(node); err != nil {
-				d.log.Trace("Discarding dial candidate", "id", node.ID(), "ip", node.IP(), "reason", err)
-			} else {
-				d.startDial(newDialTask(node, dynDialedConn))
-			}
+// 		select {
+// 		case node := <-nodesCh:
+// 			if err := d.checkDial(node); err != nil {
+// 				d.log.Trace("Discarding dial candidate", "id", node.ID(), "ip", node.IP(), "reason", err)
+// 			} else {
+// 				d.startDial(newDialTask(node, dynDialedConn))
+// 			}
 
-		case task := <-d.doneCh:
-			id := task.dest.ID()
-			delete(d.dialing, id)
-			d.updateStaticPool(id)
-			d.doneSinceLastLog++
+// 		case task := <-d.doneCh:
+// 			id := task.dest.ID()
+// 			delete(d.dialing, id)
+// 			d.updateStaticPool(id)
+// 			d.doneSinceLastLog++
 
-		case c := <-d.addPeerCh:
-			if c.is(dynDialedConn) || c.is(staticDialedConn) {
-				d.dialPeers++
-			}
-			id := c.node.ID()
-			d.peers[id] = struct{}{}
-			// Remove from static pool because the node is now connected.
-			task := d.static[id]
-			if task != nil && task.staticPoolIndex >= 0 {
-				d.removeFromStaticPool(task.staticPoolIndex)
-			}
-			// TODO: cancel dials to connected peers
+// 		case c := <-d.addPeerCh:
+// 			if c.is(dynDialedConn) || c.is(staticDialedConn) {
+// 				d.dialPeers++
+// 			}
+// 			id := c.node.ID()
+// 			d.peers[id] = struct{}{}
+// 			// Remove from static pool because the node is now connected.
+// 			task := d.static[id]
+// 			if task != nil && task.staticPoolIndex >= 0 {
+// 				d.removeFromStaticPool(task.staticPoolIndex)
+// 			}
+// 			// TODO: cancel dials to connected peers
 
-		case c := <-d.remPeerCh:
-			if c.is(dynDialedConn) || c.is(staticDialedConn) {
-				d.dialPeers--
-			}
-			delete(d.peers, c.node.ID())
-			d.updateStaticPool(c.node.ID())
+// 		case c := <-d.remPeerCh:
+// 			if c.is(dynDialedConn) || c.is(staticDialedConn) {
+// 				d.dialPeers--
+// 			}
+// 			delete(d.peers, c.node.ID())
+// 			d.updateStaticPool(c.node.ID())
 
-		case node := <-d.addStaticCh:
-			id := node.ID()
-			_, exists := d.static[id]
-			d.log.Trace("Adding static node", "id", id, "ip", node.IP(), "added", !exists)
-			if exists {
-				continue loop
-			}
-			task := newDialTask(node, staticDialedConn)
-			d.static[id] = task
-			if d.checkDial(node) == nil {
-				d.addToStaticPool(task)
-			}
+// 		case node := <-d.addStaticCh:
+// 			id := node.ID()
+// 			_, exists := d.static[id]
+// 			d.log.Trace("Adding static node", "id", id, "ip", node.IP(), "added", !exists)
+// 			if exists {
+// 				continue loop
+// 			}
+// 			task := newDialTask(node, staticDialedConn)
+// 			d.static[id] = task
+// 			if d.checkDial(node) == nil {
+// 				d.addToStaticPool(task)
+// 			}
 
-		case node := <-d.remStaticCh:
-			id := node.ID()
-			task := d.static[id]
-			d.log.Trace("Removing static node", "id", id, "ok", task != nil)
-			if task != nil {
-				delete(d.static, id)
-				if task.staticPoolIndex >= 0 {
-					d.removeFromStaticPool(task.staticPoolIndex)
-				}
-			}
+// 		case node := <-d.remStaticCh:
+// 			id := node.ID()
+// 			task := d.static[id]
+// 			d.log.Trace("Removing static node", "id", id, "ok", task != nil)
+// 			if task != nil {
+// 				delete(d.static, id)
+// 				if task.staticPoolIndex >= 0 {
+// 					d.removeFromStaticPool(task.staticPoolIndex)
+// 				}
+// 			}
 
-		case <-historyExp:
-			d.expireHistory()
+// 		case <-historyExp:
+// 			d.expireHistory()
 
-		case <-d.ctx.Done():
-			it.Close()
-			break loop
-		}
-	}
+// 		case <-d.ctx.Done():
+// 			it.Close()
+// 			break loop
+// 		}
+// 	}
 
-	d.stopHistoryTimer(historyExp)
-	for range d.dialing {
-		<-d.doneCh
-	}
-	d.wg.Done()
-}
+// 	d.stopHistoryTimer(historyExp)
+// 	for range d.dialing {
+// 		<-d.doneCh
+// 	}
+// 	d.wg.Done()
+// }
 
 // readNodes runs in its own goroutine and delivers nodes from
 // the input iterator to the nodesIn channel.
@@ -411,15 +411,15 @@ func (d *dialScheduler) checkDial(n *enode.Node) error {
 }
 
 // startStaticDials starts n static dial tasks.
-func (d *dialScheduler) startStaticDials(n int) (started int) {
-	for started = 0; started < n && len(d.staticPool) > 0; started++ {
-		idx := d.rand.Intn(len(d.staticPool))
-		task := d.staticPool[idx]
-		d.startDial(task)
-		d.removeFromStaticPool(idx)
-	}
-	return started
-}
+// func (d *dialScheduler) startStaticDials(n int) (started int) {
+// 	for started = 0; started < n && len(d.staticPool) > 0; started++ {
+// 		idx := d.rand.Intn(len(d.staticPool))
+// 		task := d.staticPool[idx]
+// 		d.startDial(task)
+// 		d.removeFromStaticPool(idx)
+// 	}
+// 	return started
+// }
 
 // updateStaticPool attempts to move the given static dial back into staticPool.
 func (d *dialScheduler) updateStaticPool(id enode.ID) {
@@ -450,16 +450,16 @@ func (d *dialScheduler) removeFromStaticPool(idx int) {
 }
 
 // startDial runs the given dial task in a separate goroutine.
-func (d *dialScheduler) startDial(task *dialTask) {
-	d.log.Trace("Starting p2p dial", "id", task.dest.ID(), "ip", task.dest.IP(), "flag", task.flags)
-	hkey := string(task.dest.ID().Bytes())
-	d.history.add(hkey, d.clock.Now().Add(dialHistoryExpiration))
-	d.dialing[task.dest.ID()] = task
-	go func() {
-		task.run(d)
-		d.doneCh <- task
-	}()
-}
+// func (d *dialScheduler) startDial(task *dialTask) {
+// 	d.log.Trace("Starting p2p dial", "id", task.dest.ID(), "ip", task.dest.IP(), "flag", task.flags)
+// 	hkey := string(task.dest.ID().Bytes())
+// 	d.history.add(hkey, d.clock.Now().Add(dialHistoryExpiration))
+// 	d.dialing[task.dest.ID()] = task
+// 	go func() {
+// 		task.run(d)
+// 		d.doneCh <- task
+// 	}()
+// }
 
 // A dialTask generated for each node that is dialed.
 type dialTask struct {
@@ -480,21 +480,21 @@ type dialError struct {
 	error
 }
 
-func (t *dialTask) run(d *dialScheduler) {
-	if t.needResolve() && !t.resolve(d) {
-		return
-	}
+// func (t *dialTask) run(d *dialScheduler) {
+// 	if t.needResolve() && !t.resolve(d) {
+// 		return
+// 	}
 
-	err := t.dial(d, t.dest)
-	if err != nil {
-		// For static nodes, resolve one more time if dialing fails.
-		if _, ok := err.(*dialError); ok && t.flags&staticDialedConn != 0 {
-			if t.resolve(d) {
-				t.dial(d, t.dest)
-			}
-		}
-	}
-}
+// 	err := t.dial(d, t.dest)
+// 	if err != nil {
+// 		// For static nodes, resolve one more time if dialing fails.
+// 		if _, ok := err.(*dialError); ok && t.flags&staticDialedConn != 0 {
+// 			if t.resolve(d) {
+// 				t.dial(d, t.dest)
+// 			}
+// 		}
+// 	}
+// }
 
 func (t *dialTask) needResolve() bool {
 	return t.flags&staticDialedConn != 0 && t.dest.IP() == nil
@@ -534,15 +534,15 @@ func (t *dialTask) resolve(d *dialScheduler) bool {
 }
 
 // dial performs the actual connection attempt.
-func (t *dialTask) dial(d *dialScheduler, dest *enode.Node) error {
-	fd, err := d.dialer.Dial(d.ctx, t.dest)
-	if err != nil {
-		d.log.Trace("Dial error", "id", t.dest.ID(), "addr", nodeAddr(t.dest), "conn", t.flags, "err", cleanupDialErr(err))
-		return &dialError{err}
-	}
-	mfd := newMeteredConn(fd, false, &net.TCPAddr{IP: dest.IP(), Port: dest.TCP()})
-	return d.setupFunc(mfd, t.flags, dest)
-}
+// func (t *dialTask) dial(d *dialScheduler, dest *enode.Node) error {
+// 	fd, err := d.dialer.Dial(d.ctx, t.dest)
+// 	if err != nil {
+// 		d.log.Trace("Dial error", "id", t.dest.ID(), "addr", nodeAddr(t.dest), "conn", t.flags, "err", cleanupDialErr(err))
+// 		return &dialError{err}
+// 	}
+// 	mfd := newMeteredConn(fd, false, &net.TCPAddr{IP: dest.IP(), Port: dest.TCP()})
+// 	return d.setupFunc(mfd, t.flags, dest)
+// }
 
 func (t *dialTask) String() string {
 	id := t.dest.ID()
