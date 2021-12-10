@@ -260,20 +260,20 @@ func (d dummyMsg) Decode(val interface{}) error {
 	return rlp.DecodeBytes(d.data, val)
 }
 
-func (f *fuzzer) doFuzz(msgCode uint64, packet interface{}) {
-	enc, err := rlp.EncodeToBytes(packet)
-	if err != nil {
-		panic(err)
-	}
-	version := f.randomInt(3) + 2 // [LES2, LES3, LES4]
-	peer, closeFn := l.NewFuzzerPeer(version)
-	defer closeFn()
-	fn, _, _, err := l.Les3[msgCode].Handle(dummyMsg{enc})
-	if err != nil {
-		panic(err)
-	}
-	fn(f, peer, func() bool { return true })
-}
+// func (f *fuzzer) doFuzz(msgCode uint64, packet interface{}) {
+// 	enc, err := rlp.EncodeToBytes(packet)
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	version := f.randomInt(3) + 2 // [LES2, LES3, LES4]
+// 	peer, closeFn := l.NewFuzzerPeer(version)
+// 	defer closeFn()
+// 	fn, _, _, err := l.Les3[msgCode].Handle(dummyMsg{enc})
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	fn(f, peer, func() bool { return true })
+// }
 
 func Fuzz(input []byte) int {
 	// We expect some large inputs
@@ -299,14 +299,14 @@ func Fuzz(input []byte) int {
 			} else {
 				req.Query.Origin.Number = uint64(f.randomInt(f.chainLen * 2))
 			}
-			f.doFuzz(l.GetBlockHeadersMsg, req)
+			// f.doFuzz(l.GetBlockHeadersMsg, req)
 
 		case 1:
 			req := &l.GetBlockBodiesPacket{Hashes: make([]common.Hash, f.randomInt(l.MaxBodyFetch+1))}
 			for i := range req.Hashes {
 				req.Hashes[i] = f.randomBlockHash()
 			}
-			f.doFuzz(l.GetBlockBodiesMsg, req)
+			// f.doFuzz(l.GetBlockBodiesMsg, req)
 
 		case 2:
 			req := &l.GetCodePacket{Reqs: make([]l.CodeReq, f.randomInt(l.MaxCodeFetch+1))}
@@ -316,14 +316,14 @@ func Fuzz(input []byte) int {
 					AccKey: f.randomAddrHash(),
 				}
 			}
-			f.doFuzz(l.GetCodeMsg, req)
+			// f.doFuzz(l.GetCodeMsg, req)
 
 		case 3:
 			req := &l.GetReceiptsPacket{Hashes: make([]common.Hash, f.randomInt(l.MaxReceiptFetch+1))}
 			for i := range req.Hashes {
 				req.Hashes[i] = f.randomBlockHash()
 			}
-			f.doFuzz(l.GetReceiptsMsg, req)
+			// f.doFuzz(l.GetReceiptsMsg, req)
 
 		case 4:
 			req := &l.GetProofsPacket{Reqs: make([]l.ProofReq, f.randomInt(l.MaxProofsFetch+1))}
@@ -343,7 +343,7 @@ func Fuzz(input []byte) int {
 					}
 				}
 			}
-			f.doFuzz(l.GetProofsV2Msg, req)
+			// f.doFuzz(l.GetProofsV2Msg, req)
 
 		case 5:
 			req := &l.GetHelperTrieProofsPacket{Reqs: make([]l.HelperTrieReq, f.randomInt(l.MaxHelperTrieProofsFetch+1))}
@@ -378,7 +378,7 @@ func Fuzz(input []byte) int {
 					}
 				}
 			}
-			f.doFuzz(l.GetHelperTrieProofsMsg, req)
+			// f.doFuzz(l.GetHelperTrieProofsMsg, req)
 
 		case 6:
 			req := &l.SendTxPacket{Txs: make([]*types.Transaction, f.randomInt(l.MaxTxSend+1))}
@@ -393,14 +393,14 @@ func Fuzz(input []byte) int {
 				}
 				req.Txs[i], _ = types.SignTx(types.NewTransaction(nonce, common.Address{}, big.NewInt(10000), params.TxGas, big.NewInt(1000000000*int64(f.randomByte())), nil), signer, bankKey)
 			}
-			f.doFuzz(l.SendTxV2Msg, req)
+			// f.doFuzz(l.SendTxV2Msg, req)
 
 		case 7:
 			req := &l.GetTxStatusPacket{Hashes: make([]common.Hash, f.randomInt(l.MaxTxStatus+1))}
 			for i := range req.Hashes {
 				req.Hashes[i] = f.randomTxHash()
 			}
-			f.doFuzz(l.GetTxStatusMsg, req)
+			// f.doFuzz(l.GetTxStatusMsg, req)
 		}
 	}
 	return 0

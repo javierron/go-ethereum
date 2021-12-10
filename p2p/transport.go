@@ -20,16 +20,14 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"fmt"
-	"io"
-	"net"
+	"log"
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/bitutil"
-	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/p2p/rlpx"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/streadway/amqp"
 )
 
 const (
@@ -46,62 +44,88 @@ const (
 // rlpxTransport is the transport used by actual (non-test) connections.
 // It wraps an RLPx connection with locks and read/write deadlines.
 type rlpxTransport struct {
-	rmu, wmu sync.Mutex
-	wbuf     bytes.Buffer
-	conn     *rlpx.Conn
+	rmu, wmu       sync.Mutex
+	wbuf           bytes.Buffer
+	conn           *rlpx.Conn
+	msg_read_chan  chan Msg
+	msg_write_chan chan Msg
 }
 
-func newRLPX(conn net.Conn, dialDest *ecdsa.PublicKey) transport {
-	return &rlpxTransport{conn: rlpx.NewConn(conn, dialDest)}
+func newRLPX(conn string,
+	// dialDest *ecdsa.PublicKey,
+	mq_channel *amqp.Channel,
+	mq_queue *amqp.Queue) transport {
+
+	read_ch := make(chan Msg)
+	write_ch := make(chan Msg)
+
+	go read_from_mq(conn, mq_channel, mq_queue, read_ch)
+	time.Sleep(1 * time.Second)
+	go write_to_mq(conn, mq_channel, write_ch)
+
+	log.Println("EXECUTING MQ ROUTINES!")
+
+	return &rlpxTransport{
+		//conn:           rlpx.NewConn(conn, dialDest),
+		msg_read_chan:  read_ch,
+		msg_write_chan: write_ch,
+	}
 }
 
 func (t *rlpxTransport) ReadMsg() (Msg, error) {
 	t.rmu.Lock()
 	defer t.rmu.Unlock()
 
-	var msg Msg
-	t.conn.SetReadDeadline(time.Now().Add(frameReadTimeout))
-	code, data, wireSize, err := t.conn.Read()
-	if err == nil {
-		// Protocol messages are dispatched to subprotocol handlers asynchronously,
-		// but package rlpx may reuse the returned 'data' buffer on the next call
-		// to Read. Copy the message data to avoid this being an issue.
-		data = common.CopyBytes(data)
-		msg = Msg{
-			ReceivedAt: time.Now(),
-			Code:       code,
-			Size:       uint32(len(data)),
-			meterSize:  uint32(wireSize),
-			Payload:    bytes.NewReader(data),
-		}
-	}
-	return msg, err
+	var msg Msg = <-t.msg_read_chan
+
+	// t.conn.SetReadDeadline(time.Now().Add(frameReadTimeout))
+
+	// channel receive here instead of read.
+	// reading is done elsewhere
+	// msg <- readchan
+	// code, data, wireSize, err := t.conn.Read()
+	// if err == nil {
+	// 	// Protocol messages are dispatched to subprotocol handlers asynchronously,
+	// 	// but package rlpx may reuse the returned 'data' buffer on the next call
+	// 	// to Read. Copy the message data to avoid this being an issue.
+	// 	data = common.CopyBytes(data)
+	// 	msg = Msg{
+	// 		ReceivedAt: time.Now(),
+	// 		Code:       code,
+	// 		Size:       uint32(len(data)),
+	// 		meterSize:  uint32(wireSize),
+	// 		Payload:    bytes.NewReader(data),
+	// 	}
+	// }
+	return msg, nil
 }
 
 func (t *rlpxTransport) WriteMsg(msg Msg) error {
 	t.wmu.Lock()
 	defer t.wmu.Unlock()
 
-	// Copy message data to write buffer.
-	t.wbuf.Reset()
-	if _, err := io.CopyN(&t.wbuf, msg.Payload, int64(msg.Size)); err != nil {
-		return err
-	}
+	t.msg_write_chan <- msg
 
-	// Write the message.
-	t.conn.SetWriteDeadline(time.Now().Add(frameWriteTimeout))
-	size, err := t.conn.Write(msg.Code, t.wbuf.Bytes())
-	if err != nil {
-		return err
-	}
+	// // Copy message data to write buffer.
+	// t.wbuf.Reset()
+	// if _, err := io.CopyN(&t.wbuf, msg.Payload, int64(msg.Size)); err != nil {
+	// 	return err
+	// }
 
-	// Set metrics.
-	msg.meterSize = size
-	if metrics.Enabled && msg.meterCap.Name != "" { // don't meter non-subprotocol messages
-		m := fmt.Sprintf("%s/%s/%d/%#02x", egressMeterName, msg.meterCap.Name, msg.meterCap.Version, msg.meterCode)
-		metrics.GetOrRegisterMeter(m, nil).Mark(int64(msg.meterSize))
-		metrics.GetOrRegisterMeter(m+"/packets", nil).Mark(1)
-	}
+	// // Write the message.
+	// t.conn.SetWriteDeadline(time.Now().Add(frameWriteTimeout))
+	// size, err := t.conn.Write(msg.Code, t.wbuf.Bytes())
+	// if err != nil {
+	// 	return err
+	// }
+
+	// // Set metrics.
+	// msg.meterSize = size
+	// if metrics.Enabled && msg.meterCap.Name != "" { // don't meter non-subprotocol messages
+	// 	m := fmt.Sprintf("%s/%s/%d/%#02x", egressMeterName, msg.meterCap.Name, msg.meterCap.Version, msg.meterCode)
+	// 	metrics.GetOrRegisterMeter(m, nil).Mark(int64(msg.meterSize))
+	// 	metrics.GetOrRegisterMeter(m+"/packets", nil).Mark(1)
+	// }
 	return nil
 }
 

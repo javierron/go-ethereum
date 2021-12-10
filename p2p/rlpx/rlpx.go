@@ -344,7 +344,8 @@ func (c *Conn) InitWithSecrets(sec Secrets) {
 
 // Close closes the underlying network connection.
 func (c *Conn) Close() error {
-	return c.conn.Close()
+	return nil
+	// return c.conn.Close()
 }
 
 // Constants for the handshake.

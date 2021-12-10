@@ -129,14 +129,15 @@ func (s *SimAdapter) Dial(ctx context.Context, dest *enode.Node) (conn net.Conn,
 		return nil, fmt.Errorf("node not running: %s", dest.ID())
 	}
 	// SimAdapter.pipe is net.Pipe (NewSimAdapter)
-	pipe1, pipe2, err := s.pipe()
+	// pipe1, pipe2, err := s.pipe()
+	_, pipe2, err := s.pipe()
 	if err != nil {
 		return nil, err
 	}
 	// this is simulated 'listening'
 	// asynchronously call the dialed destination node's p2p server
 	// to set up connection on the 'listening' side
-	go srv.SetupConn(pipe1, 0, nil)
+	// go srv.SetupConn(pipe1, 0, nil)
 	return pipe2, nil
 }
 
