@@ -29,7 +29,7 @@ import (
 const (
 	// handshakeTimeout is the maximum allowed time for the `eth` handshake to
 	// complete before dropping the connection.= as malicious.
-	handshakeTimeout = 5 * time.Second
+	handshakeTimeout = 10 * time.Second
 )
 
 // Handshake executes the eth protocol handshake, negotiating version number,

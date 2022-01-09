@@ -21,6 +21,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/p2p/rlpx"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/go-stack/stack"
 )
 
 const (
@@ -59,10 +61,15 @@ func (t *rlpxTransport) ReadMsg() (Msg, error) {
 	t.rmu.Lock()
 	defer t.rmu.Unlock()
 
+	log.Println(stack.Trace().String())
+
 	var msg Msg
 	t.conn.SetReadDeadline(time.Now().Add(frameReadTimeout))
 	code, data, wireSize, err := t.conn.Read()
+	log.Printf("RLPX ReadMsg Code %d", code)
+	log.Printf("RLPX ReadMsg %s", err)
 	if err == nil {
+		log.Printf("err == nil GOOD")
 		// Protocol messages are dispatched to subprotocol handlers asynchronously,
 		// but package rlpx may reuse the returned 'data' buffer on the next call
 		// to Read. Copy the message data to avoid this being an issue.
@@ -75,6 +82,8 @@ func (t *rlpxTransport) ReadMsg() (Msg, error) {
 			Payload:    bytes.NewReader(data),
 		}
 	}
+	log.Printf("Msg Code %d", msg.Code)
+
 	return msg, err
 }
 

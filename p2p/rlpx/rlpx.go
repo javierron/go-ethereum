@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"log"
 	mrand "math/rand"
 	"net"
 	"time"
@@ -135,10 +136,12 @@ func (c *Conn) Read() (code uint64, data []byte, wireSize int, err error) {
 
 	frame, err := c.session.readFrame(c.conn)
 	if err != nil {
+		log.Print("ERROR 11")
 		return 0, nil, 0, err
 	}
 	code, data, err = rlp.SplitUint64(frame)
 	if err != nil {
+		log.Print("ERROR 22")
 		return 0, nil, 0, fmt.Errorf("invalid message code: %v", err)
 	}
 	wireSize = len(data)

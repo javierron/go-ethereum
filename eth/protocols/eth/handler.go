@@ -18,6 +18,7 @@ package eth
 
 import (
 	"fmt"
+	"log"
 	"math/big"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
+	"github.com/go-stack/stack"
 )
 
 const (
@@ -193,6 +195,8 @@ var eth66 = map[uint64]msgHandler{
 func handleMessage(backend Backend, peer *Peer) error {
 	// Read the next message from the remote peer, and ensure it's fully consumed
 	msg, err := peer.rw.ReadMsg()
+	log.Print(stack.Trace().String())
+	log.Printf("++++++++++++++++++++++++++++++++ %d", msg.Code)
 	if err != nil {
 		return err
 	}

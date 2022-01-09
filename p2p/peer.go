@@ -319,6 +319,8 @@ func (p *Peer) readLoop(errc chan<- error) {
 }
 
 func (p *Peer) handle(msg Msg) error {
+	p.log.Info("PEER HANDLE")
+	p.log.Info(msg.String())
 	switch {
 	case msg.Code == pingMsg:
 		msg.Discard()
@@ -335,6 +337,7 @@ func (p *Peer) handle(msg Msg) error {
 	default:
 		// it's a subprotocol message
 		proto, err := p.getProto(msg.Code)
+		println("PROTO %s", proto.cap().String())
 		if err != nil {
 			return fmt.Errorf("msg code out of range: %v", msg.Code)
 		}
@@ -345,6 +348,7 @@ func (p *Peer) handle(msg Msg) error {
 		}
 		select {
 		case proto.in <- msg:
+			println("THIS HAPPENED!")
 			return nil
 		case <-p.closed:
 			return io.EOF
