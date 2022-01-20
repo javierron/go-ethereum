@@ -324,10 +324,23 @@ func (p *Peer) pingLoop() {
 
 func (p *Peer) readSubnodeMsgs() {
 
+	code_map := make(map[uint64]int)
+	n := 2 // HARDCODED :)
+
 	for msg := range p.read_msg_channel {
 		//TODO HERE IS WHERE MSG COMPARE/VOTING SHOULD HAPPEN
-		p.log.Info("MESSAGE SENT " + msg.String())
-		SendMsg(p.rw, msg)
+
+		code_map[msg.Code] += 1
+
+		l := fmt.Sprintf("CODE %d RECEIVED FROM SUBNODE (%d/%d)", msg.Code, code_map[msg.Code], n)
+		p.log.Info(l)
+
+		if code_map[msg.Code] == n {
+			p.log.Info("MESSAGE SENT " + msg.String())
+			SendMsg(p.rw, msg)
+			code_map[msg.Code] = 0
+		}
+
 	}
 }
 
