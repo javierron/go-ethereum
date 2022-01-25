@@ -437,17 +437,22 @@ func (s *sharedUDPConn) Close() error {
 func (srv *Server) listenForNewPeers() {
 
 	for peer_msg := range srv.mq_peer_channel {
+		go func(msg string) {
+			mq_chan := SetupMQChannel(srv.mq_conn)
+			q := bind_mq(msg, mq_chan)
 
-		mq_chan := SetupMQChannel(srv.mq_conn)
-		q := bind_mq(peer_msg, mq_chan)
+			c := &conn{
+				name:      msg,
+				transport: newRLPX(msg, mq_chan, q),
+				caps:      []Cap{{Version: 66, Name: "eth"}, {Version: 65, Name: "eth"}},
+				cont:      make(chan error),
+			}
 
-		time.Sleep(1 * time.Second)
-
-		srv.checkpointAddPeer <- &conn{
-			name:      peer_msg,
-			transport: newRLPX(peer_msg, mq_chan, q),
-			caps:      []Cap{{Version: 66, Name: "eth"}, {Version: 65, Name: "eth"}},
-		}
+			err := srv.checkpoint(c, srv.checkpointAddPeer)
+			if err != nil {
+				srv.log.Error("Rejected peer")
+			}
+		}(peer_msg)
 	}
 }
 
