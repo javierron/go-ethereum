@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -60,10 +59,8 @@ func newRLPX(conn string,
 	write_ch := make(chan Msg)
 
 	go read_from_mq(conn, mq_channel, mq_queue, read_ch)
-	time.Sleep(1 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 	go write_to_mq(conn, mq_channel, write_ch)
-
-	log.Println("EXECUTING MQ ROUTINES!")
 
 	return &rlpxTransport{
 		//conn:           rlpx.NewConn(conn, dialDest),
